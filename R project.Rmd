@@ -1,0 +1,102 @@
+---
+title: "R project"
+output: 
+  html_notebook: 
+    toc: true
+    toc_float: true
+---
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+load('data.RData')
+library(tidyverse)
+
+risk_free_rate = 0.0068
+
+DF <- data %>% filter(Date < "2002-01-01") %>%
+  select(Tick,Date,Close) %>%
+  spread(key= Tick , value=Close)
+
+Returns <- DF
+for (i in 2:31){
+  Returns[,i] <- Returns[,i]/lag(Returns[,i])-1
+  Returns[1,i] <- 0
+}
+
+Adjusted_SR <- matrix(30,1)#Returns
+for (i in 2:31){
+  #Adjusted_SR[1,i] <- mean(Adjusted_SR[2:nrow(Adjusted_SR),i])/sd(Adjusted_SR[2:nrow(Adjusted_SR),i])
+  Adjusted_SR[i-1] <- mean(Returns[1:nrow(Returns),i])/sd(Returns[1:nrow(Returns),i])
+}
+Adjusted_SR = cbind.data.frame(unique(data$Tick), Adjusted_SR)
+Adjusted_SR = Adjusted_SR %>% arrange(Adjusted_SR)
+Assets_selected = tail(Adjusted_SR, 10)
+Assets_selected[,2] = c(1:10)
+colnames(Assets_selected) = c("Tick", "Number")
+initial_weight = 1/nrow(Assets_selected)
+
+
+data_filtered = subset.data.frame(data, data$Tick %in% Assets_selected$Tick)
+data_filtered = data_filtered %>% filter(Date >= "2002-01-01")
+Close_Price = data_filtered %>% select(Tick,Date,Close) %>% 
+  spread(key = Tick, value = Close)
+Assets_Returns = Close_Price
+
+for (i in 2:nrow(Close_Price)){
+  for (j in 2:ncol(Close_Price))
+    Assets_Returns[i,j] = log(Close_Price[i,j]/Close_Price[i-1,j])
+}
+Assets_Returns[1,2:ncol(Assets_Returns)] = 0
+
+portfolio = data.frame(Assets_Returns %>% gather(key = Tick, value = Returns, -Date))
+portfolio = portfolio %>% arrange(Date)
+
+Assets_Weight = Assets_Returns
+Assets_Weight[1,2:ncol(Assets_Weight)] = initial_weight
+#for (i in 1:nrow(Assets_Weight)){
+#  for (j in 2:ncol(Assets_Weight))
+#    Assets_Weight[i,j] = initial_weight
+#}
+stoploop = 0
+for (i in 2:nrow(Assets_Weight)){
+  rnd = sample(2:11, 1)
+  while (Assets_Returns[i-1, rnd] < -0.01 & stoploop <= 10){
+    rnd = sample(2:11, 1)
+    stoploop = stoploop + 1
+  }
+  for (j in 2:ncol(Assets_Weight)){
+    if (stoploop <= 10){
+      if (j == rnd){
+        Assets_Weight[i,j] = Assets_Weight[i-1,j] + 0.09
+      } else {
+          Assets_Weight[i,j] = Assets_Weight[i-1,j] - 0.01
+      }
+    } else {
+      Assets_Weight[i,j] = Assets_Weight[i-1,j]
+    }
+  }
+  stoploop = 0
+}
+
+portfolio_Return_per_month = matrix(ncol(Assets_Returns),1)
+portfolio_Cumul_Return = matrix(ncol(Assets_Returns),1)
+
+for (i in 1:nrow(Assets_Returns)){
+  portfolio_Return_per_month[i] = sum(Assets_Weight[i:2,ncol(Assets_Weight)]*Assets_Returns[i,ncol(Assets_Returns)])
+  portfolio_Cumul_Return[i] = sum(portfolio_Return_per_month[1:i])
+}
+portfolio = cbind.data.frame((Assets_Weight$Date), portfolio_Return_per_month, portfolio_Cumul_Return)
+colnames(portfolio) = c("Date", "Return", "Cumul_Return")
+
+Sharpe_Ratio = (mean(portfolio$Return) - risk_free_rate) / (sd(portfolio$Return))
+VaR_95 = quantile(-portfolio$Return, 0.95)
+
+cat("Sharpe Ratio (with 0.68% risk free rate reference): ", Sharpe_Ratio)
+cat("\nVaR at 0.95 is: ", VaR_95)
+
+ggplot(portfolio, aes(x = Date, y = Cumul_Return )) + geom_line()
+```
+
